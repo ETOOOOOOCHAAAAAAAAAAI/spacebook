@@ -13,14 +13,22 @@ func NewSpaceService(repo *repository.SpaceRepository) *SpaceService {
 	return &SpaceService{repo: repo}
 }
 
+func (s *SpaceService) ListSpaces() ([]domain.Space, error) {
+	return s.repo.List()
+}
+
 func (s *SpaceService) CreateSpace(ownerID int, req *domain.CreateSpaceRequest) (*domain.Space, error) {
-	return s.repo.Create(ownerID, req)
-}
+	space := &domain.Space{
+		OwnerID:     ownerID,
+		Title:       req.Title,
+		Description: req.Description,
+		AreaM2:      req.AreaM2,
+		Price:       req.Price,
+		Phone:       req.Phone,
+	}
 
-func (s *SpaceService) ListActiveSpaces() ([]domain.Space, error) {
-	return s.repo.ListActive()
-}
-
-func (s *SpaceService) ListOwnerSpaces(ownerID int) ([]domain.Space, error) {
-	return s.repo.ListByOwner(ownerID)
+	if err := s.repo.Create(space); err != nil {
+		return nil, err
+	}
+	return space, nil
 }

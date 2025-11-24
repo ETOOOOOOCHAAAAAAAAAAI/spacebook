@@ -10,58 +10,47 @@ import (
 )
 
 type SpaceHandler struct {
-	spaceService *services.SpaceService
+	svc *services.SpaceService
 }
 
-func NewSpaceHandler(spaceService *services.SpaceService) *SpaceHandler {
-	return &SpaceHandler{spaceService: spaceService}
+func NewSpaceHandler(svc *services.SpaceService) *SpaceHandler {
+	return &SpaceHandler{svc: svc}
 }
 
 func (h *SpaceHandler) ListSpaces(c *gin.Context) {
-	spaces, err := h.spaceService.ListActiveSpaces()
+	spaces, err := h.svc.ListSpaces()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to list spaces"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load spaces"})
 		return
 	}
-	c.JSON(http.StatusOK, spaces)
+
+	c.JSON(http.StatusOK, gin.H{"items": spaces})
 }
 
 func (h *SpaceHandler) CreateSpace(c *gin.Context) {
-	userIDAny, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "user not authenticated"})
-		return
-	}
-	ownerID := userIDAny.(int)
-
 	var req domain.CreateSpaceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid request: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
 
-	space, err := h.spaceService.CreateSpace(ownerID, &req)
+	rawID, ok := c.Get("userID")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		return
+	}
+
+	ownerID, ok := rawID.(int)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid user id in context"})
+		return
+	}
+
+	space, err := h.svc.CreateSpace(ownerID, &req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to create space"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create space"})
 		return
 	}
 
 	c.JSON(http.StatusCreated, space)
-}
-
-func (h *SpaceHandler) ListMySpaces(c *gin.Context) {
-	userIDAny, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "user not authenticated"})
-		return
-	}
-	ownerID := userIDAny.(int)
-
-	spaces, err := h.spaceService.ListOwnerSpaces(ownerID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to list owner spaces"})
-		return
-	}
-
-	c.JSON(http.StatusOK, spaces)
 }
