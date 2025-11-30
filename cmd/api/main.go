@@ -1,7 +1,14 @@
 package main
 
 import (
+	"SpaceBookProject/internal/worker"
+	"context"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"SpaceBookProject/internal/auth"
 	"SpaceBookProject/internal/config"
@@ -18,22 +25,24 @@ import (
 func main() {
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to load config: %v", err)
 	}
 
 	database, err := db.InitDB(&cfg.Database)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("failed to init db: %v", err)
 	}
+	defer database.Close()
 
 	jwtManager := auth.NewJWTManager(cfg.JWT.SecretKey)
 
 	userRepo := repository.NewUserRepository(database)
 	bookingRepo := repository.NewBookingRepository(database)
 	spaceRepo := repository.NewSpaceRepository(database)
+	eventsChan := make(chan domain.BookingEvent, 100)
 
 	authService := services.NewAuthService(userRepo, jwtManager)
-	bookingService := services.NewBookingService(bookingRepo, spaceRepo)
+	bookingService := services.NewBookingService(bookingRepo, spaceRepo, eventsChan)
 	spaceService := services.NewSpaceService(spaceRepo)
 
 	authHandler := handlers.NewAuthHandler(authService)
@@ -80,7 +89,34 @@ func main() {
 		ownerBookings.PATCH("/:id/reject", bookingHandler.RejectBooking)
 	}
 
-	if err := r.Run(":" + cfg.Server.Port); err != nil {
-		log.Fatal(err)
+	srv := &http.Server{
+		Addr:    ":" + cfg.Server.Port,
+		Handler: r,
 	}
+
+	ctx, stop := signal.NotifyContext(context.Background(),
+		os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	bookingWorker := worker.NewBookingEventWorker(eventsChan)
+	go bookingWorker.Run(ctx)
+
+	go func() {
+		log.Printf("server listening on :%s", cfg.Server.Port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("listen error: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("shutdown signal received")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Fatalf("server forced to shutdown: %v", err)
+	}
+
+	log.Println("server exited gracefully")
 }

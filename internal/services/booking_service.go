@@ -18,12 +18,14 @@ var (
 type BookingService struct {
 	bookings *repository.BookingRepository
 	spaces   *repository.SpaceRepository
+	events   chan<- domain.BookingEvent
 }
 
-func NewBookingService(bookings *repository.BookingRepository, spaces *repository.SpaceRepository) *BookingService {
+func NewBookingService(bookings *repository.BookingRepository, spaces *repository.SpaceRepository, events chan<- domain.BookingEvent) *BookingService {
 	return &BookingService{
 		bookings: bookings,
 		spaces:   spaces,
+		events:   events,
 	}
 }
 
@@ -61,6 +63,16 @@ func (s *BookingService) CreateBooking(tenantID int, req *domain.CreateBookingRe
 	if err := s.bookings.Create(b); err != nil {
 		return nil, err
 	}
+	if s.events != nil {
+		s.events <- domain.BookingEvent{
+			Type:      domain.BookingEventCreated,
+			BookingID: b.ID,
+			SpaceID:   b.SpaceID,
+			TenantID:  b.TenantID,
+			At:        time.Now(),
+		}
+	}
+
 	return b, nil
 }
 
@@ -88,7 +100,20 @@ func (s *BookingService) CancelBooking(id, tenantID int) error {
 		return ErrWrongStatus
 	}
 
-	return s.bookings.UpdateStatus(id, domain.BookingStatusCancelled)
+	if err := s.bookings.UpdateStatus(id, domain.BookingStatusCancelled); err != nil {
+		return err
+	}
+	if s.events != nil {
+		s.events <- domain.BookingEvent{
+			Type:      domain.BookingEventCancelled,
+			BookingID: b.ID,
+			SpaceID:   b.SpaceID,
+			TenantID:  b.TenantID,
+			At:        time.Now(),
+		}
+	}
+
+	return nil
 }
 
 func (s *BookingService) ApproveBooking(id int, ownerID int) error {
@@ -118,7 +143,20 @@ func (s *BookingService) ApproveBooking(id int, ownerID int) error {
 		return ErrOverlappingBooking
 	}
 
-	return s.bookings.UpdateStatus(id, domain.BookingStatusApproved)
+	if err := s.bookings.UpdateStatus(id, domain.BookingStatusApproved); err != nil {
+		return err
+	}
+	if s.events != nil {
+		s.events <- domain.BookingEvent{
+			Type:      domain.BookingEventApproved,
+			BookingID: b.ID,
+			SpaceID:   b.SpaceID,
+			TenantID:  b.TenantID,
+			At:        time.Now(),
+		}
+	}
+
+	return nil
 }
 
 func (s *BookingService) RejectBooking(id int, ownerID int) error {
@@ -140,5 +178,18 @@ func (s *BookingService) RejectBooking(id int, ownerID int) error {
 		return ErrWrongStatus
 	}
 
-	return s.bookings.UpdateStatus(id, domain.BookingStatusRejected)
+	if err := s.bookings.UpdateStatus(id, domain.BookingStatusRejected); err != nil {
+		return err
+	}
+	if s.events != nil {
+		s.events <- domain.BookingEvent{
+			Type:      domain.BookingEventRejected,
+			BookingID: b.ID,
+			SpaceID:   b.SpaceID,
+			TenantID:  b.TenantID,
+			At:        time.Now(),
+		}
+	}
+
+	return nil
 }
